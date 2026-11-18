@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OfflineLab Demo PWA</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="app" data-testid="app-shell">
+    <header>
+      <div>
+        <h1>OfflineNotes PWA</h1>
+        <small data-testid="user-session">User: demo-user</small>
+      </div>
+      <div class="status-bar">
+        <span id="network-status" data-testid="network-status" class="pill online">Online</span>
+        <span id="sync-status" data-testid="sync-status" class="pill">Idle</span>
+        <span class="pill">Pending: <strong id="pending-count" data-testid="pending-count">0</strong></span>
+      </div>
+    </header>
+
+    <div id="error-banner" data-testid="error-banner" class="error-banner" role="alert"></div>
+
+    <form id="note-form" data-testid="note-form">
+      <label for="note-title">Note Title</label>
+      <input id="note-title" data-testid="note-title-input" name="title" type="text" placeholder="Enter a note..." required />
+
+      <label for="note-body">Details</label>
+      <textarea id="note-body" data-testid="note-body-input" name="body" rows="2" placeholder="Optional details..."></textarea>
+
+      <div style="display:flex;gap:8px;">
+        <button type="submit" data-testid="save-note-btn">Save</button>
+        <button type="button" id="retry-sync-btn" data-testid="retry-sync-btn" class="secondary">Retry Sync</button>
+        <button type="button" id="refresh-server-btn" data-testid="refresh-server-btn" class="secondary">Fetch Server</button>
+      </div>
+    </form>
+
+    <section>
+      <h2>Notes (<span id="notes-count" data-testid="notes-count">0</span>)</h2>
+      <ul id="notes-list" data-testid="notes-list" class="notes-list"></ul>
+    </section>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

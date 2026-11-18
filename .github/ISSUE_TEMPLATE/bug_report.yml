@@ -1,0 +1,25 @@
+name: Bug Report
+description: Report a bug or unexpected behavior in OfflineLab
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Clear description of what happened vs. what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction Steps
+      description: Provide a minimal offlinelab.config.ts, scenario YAML/TS, and CLI command.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Output of `npx offlinelab doctor --json` (remove any private URLs).
+    validations:
+      required: true

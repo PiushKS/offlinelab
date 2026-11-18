@@ -1,0 +1,44 @@
+name: reconnect-sync
+description: Verify offline note creation persists across reload and syncs after reconnecting
+mode: pwa
+browser: chromium
+
+steps:
+  - action: navigate
+    path: /
+
+  - action: waitForServiceWorker
+    controlled: true
+    timeoutMs: 15000
+
+  - action: navigate
+    path: /
+
+  - action: setOffline
+
+  - action: fill
+    selector: "[data-testid='note-title-input']"
+    value: "PWA Queued Note"
+
+  - action: click
+    selector: "[data-testid='save-note-btn']"
+
+  - action: expectText
+    selector: "[data-testid='pending-count']"
+    text: "1"
+
+  - action: reload
+
+  - action: expectText
+    selector: "[data-testid='notes-list']"
+    text: "PWA Queued Note"
+
+  - action: setOnline
+
+  - action: expectText
+    selector: "[data-testid='sync-status']"
+    text: "Synced"
+
+  - action: expectText
+    selector: "[data-testid='pending-count']"
+    text: "0"

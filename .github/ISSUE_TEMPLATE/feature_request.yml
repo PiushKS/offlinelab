@@ -1,0 +1,23 @@
+name: Feature Request
+description: Propose a new capability, network fault, or scenario action
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What offline or network resilience testing workflow are you trying to solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution
+      description: Describe the CLI option, scenario action, or SDK API you envision.
+    validations:
+      required: true
+  - type: textarea
+    id: browser-notes
+    attributes:
+      label: Browser Compatibility Considerations
+      description: Note any Chromium / Firefox / WebKit differences if known.

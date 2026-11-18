@@ -1,0 +1,30 @@
+name: basic-offline-toggle
+description: Verify basic offline/online UI transitions on a web application
+mode: auto
+browser: chromium
+
+steps:
+  - action: navigate
+    path: /
+
+  - action: expectVisible
+    selector: "[data-testid='app-shell']"
+
+  - action: expectText
+    selector: "[data-testid='network-status']"
+    text: "Online"
+
+  - action: setOffline
+
+  - action: expectText
+    selector: "[data-testid='network-status']"
+    text: "Offline"
+
+  - action: screenshot
+    name: offline-indicator
+
+  - action: setOnline
+
+  - action: expectText
+    selector: "[data-testid='network-status']"
+    text: "Online"

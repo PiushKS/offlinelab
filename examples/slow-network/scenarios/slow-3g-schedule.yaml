@@ -1,0 +1,33 @@
+name: slow-3g-and-transitions
+description: Test scripted network transitions from online to slow-3g, offline, and back online
+mode: auto
+browser: chromium
+
+steps:
+  - action: navigate
+    path: /
+
+  - action: startNetworkSchedule
+    steps:
+      - atMs: 0
+        profile: online
+        label: ONLINE
+      - atMs: 400
+        profile: slow-3g
+        label: SLOW_3G
+      - atMs: 1000
+        profile: offline
+        label: OFFLINE
+      - atMs: 1600
+        profile: online
+        label: ONLINE
+
+  - action: wait
+    durationMs: 2000
+    reason: "Allow scripted network transition sequence to complete"
+
+  - action: stopNetworkSchedule
+
+  - action: expectText
+    selector: "[data-testid='network-status']"
+    text: "Online"

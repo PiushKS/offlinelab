@@ -1,0 +1,36 @@
+name: offline-navigation
+description: Verify cached PWA navigation and offline fallback page
+mode: pwa
+browser: chromium
+
+steps:
+  - action: navigate
+    path: /
+
+  - action: waitForServiceWorker
+    controlled: true
+    timeoutMs: 15000
+
+  - action: navigate
+    path: /
+
+  - action: expectCacheContains
+    urlPattern: "**/offline.html"
+
+  - action: setNetwork
+    profile: offline
+
+  - action: reload
+
+  - action: expectVisible
+    selector: "[data-testid='app-shell']"
+
+  - action: expectText
+    selector: "[data-testid='network-status']"
+    text: "Offline"
+
+  - action: screenshot
+    name: offline-home
+
+  - action: setNetwork
+    profile: online

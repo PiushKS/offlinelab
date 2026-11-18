@@ -1,0 +1,35 @@
+name: api-fault-recovery
+description: Inject HTTP 500 on note creation and verify client preserves note and recovers on retry
+mode: interception
+browser: chromium
+
+steps:
+  - action: navigate
+    path: /
+
+  - action: injectFailure
+    id: fail-post-500
+    url: "**/api/notes"
+    methods: ["POST"]
+    fault: http-500
+
+  - action: fill
+    selector: "[data-testid='note-title-input']"
+    value: "Resilient Note"
+
+  - action: click
+    selector: "[data-testid='save-note-btn']"
+
+  - action: expectText
+    selector: "[data-testid='sync-status']"
+    text: "Sync failed"
+
+  - action: removeFailure
+    id: fail-post-500
+
+  - action: click
+    selector: "[data-testid='retry-sync-btn']"
+
+  - action: expectText
+    selector: "[data-testid='sync-status']"
+    text: "Synced"
