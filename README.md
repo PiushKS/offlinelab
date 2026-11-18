@@ -2,9 +2,12 @@
 
 **Break the network. Not your app.**
 
+[![npm version](https://img.shields.io/npm/v/offlinelab.svg)](https://www.npmjs.com/package/offlinelab)
 [![CI](https://github.com/PiushKS/offlinelab/actions/workflows/ci.yml/badge.svg)](https://github.com/PiushKS/offlinelab/actions/workflows/ci.yml)
 [![Platform Compatibility](https://github.com/PiushKS/offlinelab/actions/workflows/compatibility.yml/badge.svg)](https://github.com/PiushKS/offlinelab/actions/workflows/compatibility.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+
+**npm package:** https://www.npmjs.com/package/offlinelab
 
 **OfflineLab** is a local-first, privacy-first, deterministic open-source CLI and TypeScript testing framework built on [Playwright](https://playwright.dev/) for verifying how web applications and Progressive Web Apps (PWAs) behave under real network disruptions: complete disconnection, slow connections, high latency, intermittent request loss, API faults, offline persistence, cache fallbacks, and reconnection synchronization.
 
@@ -106,6 +109,8 @@ flowchart LR
 
 ### Install the Package
 
+Install [`offlinelab`](https://www.npmjs.com/package/offlinelab) from npm:
+
 ```bash
 # npm
 npm install -D offlinelab
@@ -115,6 +120,9 @@ pnpm add -D offlinelab
 
 # yarn
 yarn add -D offlinelab
+
+# Or run directly without installing
+npx offlinelab --help
 ```
 
 ### Install Playwright Browsers
@@ -1360,6 +1368,8 @@ npm pack --dry-run          # Verify published npm tarball contents
 
 ### Project Links & Governance
 
+- npm package: https://www.npmjs.com/package/offlinelab
+- GitHub repository: https://github.com/PiushKS/offlinelab
 - Contribution guide: [CONTRIBUTING.md](./CONTRIBUTING.md)
 - Code of conduct: [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)
 - Security policy: [SECURITY.md](./SECURITY.md)
