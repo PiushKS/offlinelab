@@ -6,7 +6,7 @@ import {
   ExitCode,
   type ExitCodeValue,
 } from "../../core/errors/index.js";
-import { OfflineLabRunner } from "../../core/runner/runner.js";
+import { OfflineLabRunner, type ShardConfig } from "../../core/runner/runner.js";
 import { TerminalRenderer } from "../../reporters/terminal/terminal-renderer.js";
 import type {
   BrowserName,
@@ -20,6 +20,13 @@ export interface RunCommandOptions {
   url?: string;
   scenario?: string[];
   pattern?: string;
+  tag?: string[];
+  shard?: string;
+  bail?: boolean;
+  maxFailures?: string;
+  failOnFlaky?: boolean;
+  ignoreHttpsErrors?: boolean;
+  proxy?: string;
   browser?: string[];
   profile?: string;
   device?: string;
@@ -38,6 +45,24 @@ export interface RunCommandOptions {
   debug?: boolean;
   json?: boolean;
   cwd?: string;
+}
+
+export function parseShardOption(raw?: string): ShardConfig | undefined {
+  if (!raw) return undefined;
+  const match = /^(\d+)\s*\/\s*(\d+)$/.exec(raw.trim());
+  if (!match) {
+    throw new ConfigValidationError(
+      `Invalid --shard format "${raw}". Expected "<index>/<total>" such as "1/4".`,
+    );
+  }
+  const index = Number(match[1]);
+  const total = Number(match[2]);
+  if (!Number.isInteger(index) || !Number.isInteger(total) || total < 1 || index < 1 || index > total) {
+    throw new ConfigValidationError(
+      `Invalid --shard "${raw}": index must be between 1 and total (total >= 1).`,
+    );
+  }
+  return { index, total };
 }
 
 function parseBrowsers(raw?: string[]): BrowserName[] | undefined {
@@ -110,6 +135,15 @@ export async function runExecuteCommand(options: RunCommandOptions): Promise<Exi
   const workers = parsePositiveInt(options.workers, "workers");
   const retries = parsePositiveInt(options.retries, "retries", true);
   const timeoutMs = parsePositiveInt(options.timeout, "timeout");
+  const maxFailuresOpt = parsePositiveInt(options.maxFailures, "max-failures", true);
+  const shard = parseShardOption(options.shard);
+
+  if (options.bail && maxFailuresOpt !== undefined && maxFailuresOpt !== 1) {
+    throw new ConfigValidationError(
+      "Cannot combine --bail with --max-failures other than 1.",
+    );
+  }
+  const maxFailures = options.bail ? 1 : maxFailuresOpt;
 
   let unsupportedPolicy: UnsupportedCapabilityPolicy | undefined;
   if (options.unsupportedPolicy) {
@@ -134,6 +168,10 @@ export async function runExecuteCommand(options: RunCommandOptions): Promise<Exi
   if (workers !== undefined) overrides.workers = workers;
   if (retries !== undefined) overrides.retries = retries;
   if (timeoutMs !== undefined) overrides.timeoutMs = timeoutMs;
+  if (maxFailures !== undefined) overrides.maxFailures = maxFailures;
+  if (options.failOnFlaky) overrides.failOnFlaky = true;
+  if (options.ignoreHttpsErrors) overrides.ignoreHTTPSErrors = true;
+  if (options.proxy) overrides.proxy = { server: options.proxy };
   if (unsupportedPolicy) overrides.unsupportedPolicy = unsupportedPolicy;
   if (options.reportDir || reporters) {
     overrides.reports = {
@@ -163,14 +201,20 @@ export async function runExecuteCommand(options: RunCommandOptions): Promise<Exi
   });
 
   const abortController = new AbortController();
-  let interrupted = false;
+  let interruptedSignal: "SIGINT" | "SIGTERM" | undefined;
 
   const onSigInt = () => {
-    interrupted = true;
+    interruptedSignal = "SIGINT";
     renderer.writeProgress("Received SIGINT, cleaning up browser contexts and child processes...");
     abortController.abort(new Error("Interrupted by SIGINT"));
   };
+  const onSigTerm = () => {
+    interruptedSignal = "SIGTERM";
+    renderer.writeProgress("Received SIGTERM, cleaning up browser contexts and child processes...");
+    abortController.abort(new Error("Terminated by SIGTERM"));
+  };
   process.once("SIGINT", onSigInt);
+  process.once("SIGTERM", onSigTerm);
 
   try {
     const runner = new OfflineLabRunner(config);
@@ -179,6 +223,7 @@ export async function runExecuteCommand(options: RunCommandOptions): Promise<Exi
     const useZeroConfigInspect =
       Boolean(options.url) &&
       (!options.scenario || options.scenario.length === 0) &&
+      (!options.tag || options.tag.length === 0) &&
       !options.pattern &&
       !options.config;
 
@@ -188,6 +233,10 @@ export async function runExecuteCommand(options: RunCommandOptions): Promise<Exi
       inspectUrl: useZeroConfigInspect ? options.url : undefined,
       scenarioNames: options.scenario,
       scenarioPattern: options.pattern,
+      tags: options.tag && options.tag.length > 0 ? options.tag : undefined,
+      shard,
+      maxFailures,
+      failOnFlaky: options.failOnFlaky,
       profileOverride: options.profile,
       signal: abortController.signal,
       onProgress: (msg) => {
@@ -216,10 +265,10 @@ export async function runExecuteCommand(options: RunCommandOptions): Promise<Exi
       },
     });
 
-    if (output.report.scenarios.length === 0 && !interrupted) {
+    if (output.report.scenarios.length === 0 && !interruptedSignal && !shard) {
       throw new ConfigValidationError(
         `No scenarios matched (patterns: ${config.scenarios.join(", ")}).`,
-        { patterns: config.scenarios, scenarioNames: options.scenario, pattern: options.pattern },
+        { patterns: config.scenarios, scenarioNames: options.scenario, pattern: options.pattern, tags: options.tag },
         "Run `offlinelab init` to create example scenarios, or pass `--url http://localhost:3000` for zero-config inspection.",
       );
     }
@@ -240,12 +289,16 @@ export async function runExecuteCommand(options: RunCommandOptions): Promise<Exi
       junit: relJunit,
     });
 
-    if (interrupted) {
+    if (interruptedSignal === "SIGINT") {
       return ExitCode.INTERRUPTED;
+    }
+    if (interruptedSignal === "SIGTERM") {
+      return ExitCode.TERMINATED;
     }
 
     return output.hasFailures ? ExitCode.ASSERTION_FAILURE : ExitCode.SUCCESS;
   } finally {
     process.removeListener("SIGINT", onSigInt);
+    process.removeListener("SIGTERM", onSigTerm);
   }
 }

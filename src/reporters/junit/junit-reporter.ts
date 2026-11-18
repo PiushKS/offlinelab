@@ -25,6 +25,15 @@ export class JUnitReporter {
         `    <testcase classname="${escapeXml(className)}" name="${escapeXml(scenario.name)}" time="${timeSec}">`,
       );
 
+      if (scenario.flaky || scenario.attempts > 1) {
+        lines.push("      <properties>");
+        if (scenario.flaky) {
+          lines.push('        <property name="flaky" value="true" />');
+        }
+        lines.push(`        <property name="attempts" value="${scenario.attempts}" />`);
+        lines.push("      </properties>");
+      }
+
       if (scenario.status === "failed") {
         const message = scenario.error?.message ?? scenario.reason ?? "Scenario failed";
         const type = scenario.error?.code ?? scenario.error?.name ?? "AssertionFailure";

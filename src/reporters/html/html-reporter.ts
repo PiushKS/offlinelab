@@ -409,7 +409,7 @@ export class HtmlReporter {
   document.getElementById("panel-overview").innerHTML =
     '<div class="kpi-grid">' +
       '<div class="kpi"><div class="kpi-label">Total Scenarios</div><div class="kpi-value">' + esc(summary.total) + '</div><div class="kpi-sub">Duration: ' + fmtMs(report.durationMs) + '</div></div>' +
-      '<div class="kpi"><div class="kpi-label">Passed</div><div class="kpi-value" style="color:var(--pass)">' + esc(summary.passed) + '</div><div class="kpi-sub">Assertions passed: ' + esc(summary.passedAssertions) + '</div></div>' +
+      '<div class="kpi"><div class="kpi-label">Passed</div><div class="kpi-value" style="color:var(--pass)">' + esc(summary.passed) + '</div><div class="kpi-sub">Assertions passed: ' + esc(summary.passedAssertions) + (summary.flaky ? ' &middot; Flaky: ' + esc(summary.flaky) : '') + '</div></div>' +
       '<div class="kpi"><div class="kpi-label">Failed</div><div class="kpi-value" style="color:var(--fail)">' + esc(summary.failed) + '</div><div class="kpi-sub">Assertions failed: ' + esc(summary.failedAssertions) + '</div></div>' +
       '<div class="kpi"><div class="kpi-label">Skipped / Unsupported</div><div class="kpi-value">' + esc((summary.skipped || 0) + (summary.unsupported || 0)) + '</div><div class="kpi-sub">Unsupported: ' + esc(summary.unsupported || 0) + '</div></div>' +
       '<div class="kpi"><div class="kpi-label">Network Requests</div><div class="kpi-value">' + esc(summary.totalRequests) + '</div><div class="kpi-sub">Failed: ' + esc(summary.failedRequests) + ' &middot; Injected: ' + esc(summary.injectedFaults) + '</div></div>' +

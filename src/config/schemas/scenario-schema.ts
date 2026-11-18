@@ -281,6 +281,7 @@ export const ScenarioStepSchema = z.discriminatedUnion("action", [
       min: z.number().int().min(0).optional(),
       max: z.number().int().min(0).optional(),
       method: z.string().optional(),
+      timeoutMs: z.number().int().min(100).max(300_000).optional(),
     })
     .strict(),
   z
@@ -289,12 +290,48 @@ export const ScenarioStepSchema = z.discriminatedUnion("action", [
       url: z.string().min(1),
       status: z.number().int().min(100).max(599),
       method: z.string().optional(),
+      timeoutMs: z.number().int().min(100).max(300_000).optional(),
     })
     .strict(),
   z
     .object({
       action: z.literal("expectNoConsoleErrors"),
       ignorePatterns: z.array(z.string()).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("expectNoFailedRequests"),
+      ignorePatterns: z.array(z.string()).optional(),
+      includeInjected: z.boolean().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("expectServiceWorker"),
+      registered: z.boolean().optional(),
+      controlled: z.boolean().optional(),
+      state: z.enum(["installing", "installed", "activating", "activated"]).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("expectRetryPattern"),
+      url: z.string().min(1),
+      method: z.string().optional(),
+      minAttempts: z.number().int().min(1).max(100),
+      maxAttempts: z.number().int().min(1).max(100).optional(),
+      minIntervalMs: z.number().int().min(0).max(300_000).optional(),
+      requireBackoff: z.boolean().optional(),
+      timeoutMs: z.number().int().min(100).max(300_000).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("expectMaxRequestDuration"),
+      url: z.string().min(1),
+      maxDurationMs: z.number().int().min(1).max(300_000),
+      method: z.string().optional(),
     })
     .strict(),
   z

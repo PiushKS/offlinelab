@@ -69,6 +69,9 @@ export class ScenarioExecutor {
         break;
       }
       lastResult = await this.executeAttempt(input, attempt);
+      if (lastResult.status === "passed" && attempt > 1) {
+        lastResult.flaky = true;
+      }
       if (
         lastResult.status === "passed" ||
         lastResult.status === "skipped" ||
@@ -248,6 +251,11 @@ export class ScenarioExecutor {
         baseURL: scenario.baseURL ?? config.baseURL,
         serviceWorkers: effectiveSwPolicy,
         device: scenario.device ?? config.device,
+        proxy: config.proxy,
+        ignoreHTTPSErrors: config.ignoreHTTPSErrors,
+        extraHTTPHeaders: config.extraHTTPHeaders,
+        locale: config.locale,
+        timezoneId: config.timezoneId,
         storageState: scenario.storageState ?? config.auth?.storageState,
         persistentProfileDir: config.auth?.persistentProfileDir,
         timeoutMs: config.timeouts?.browserLaunchMs ?? 30_000,
@@ -432,6 +440,7 @@ export class ScenarioExecutor {
               eventRecorder,
               config,
               baseURL: scenario.baseURL ?? config.baseURL,
+              signal: scenarioAbort.signal,
               captureScreenshot: captureScreenshotHelper,
               onSwSnapshot: (sw) => {
                 latestSwSnapshot = sw;
@@ -596,6 +605,38 @@ export class ScenarioExecutor {
       if (reqArt) artifacts.push(reqArt);
     }
 
+    // Enforce optional scenario-level SLO budgets if scenario passed
+    if (status === "passed" && config.budgets) {
+      if (
+        config.budgets.maxConsoleErrors !== undefined &&
+        consoleErrors.length > config.budgets.maxConsoleErrors
+      ) {
+        status = "failed";
+        caughtError = new OfflineLabError(
+          `Budget exceeded: observed ${consoleErrors.length} console error(s), limit is ${config.budgets.maxConsoleErrors}.`,
+          {
+            code: "BUDGET_EXCEEDED",
+            exitCode: 1,
+            suggestion: "Fix uncaught console errors or adjust `budgets.maxConsoleErrors`.",
+          },
+        );
+      } else if (config.budgets.maxUninjectedFailedRequests !== undefined) {
+        const uninjectedFailed = requests.filter((r) => r.failed && !r.injectedRuleId).length;
+        if (uninjectedFailed > config.budgets.maxUninjectedFailedRequests) {
+          status = "failed";
+          caughtError = new OfflineLabError(
+            `Budget exceeded: observed ${uninjectedFailed} uninjected failed request(s), limit is ${config.budgets.maxUninjectedFailedRequests}.`,
+            {
+              code: "BUDGET_EXCEEDED",
+              exitCode: 1,
+              suggestion:
+                "Investigate unexpected failed network requests or adjust `budgets.maxUninjectedFailedRequests`.",
+            },
+          );
+        }
+      }
+    }
+
     // Build evidence-based diagnostics
     diagnostics.push(
       ...this.buildDiagnostics({
@@ -694,6 +735,7 @@ export class ScenarioExecutor {
     eventRecorder: EventRecorder;
     config: OfflineLabConfig;
     baseURL?: string;
+    signal: AbortSignal;
     captureScreenshot: (name: string, opts?: { fullPage?: boolean }) => Promise<string>;
     onSwSnapshot: (sw: ScenarioResult["serviceWorker"]) => void;
     onCacheSnapshot: (cache: ScenarioResult["cacheStorage"]) => void;
@@ -859,11 +901,28 @@ export class ScenarioExecutor {
           break;
 
         case "wait":
-          await new Promise((r) => setTimeout(r, step.durationMs));
+          await new Promise<void>((resolve, reject) => {
+            if (args.signal.aborted) {
+              reject(args.signal.reason ?? new Error("Scenario aborted"));
+              return;
+            }
+            const timer = setTimeout(() => {
+              args.signal.removeEventListener("abort", onAbort);
+              resolve();
+            }, step.durationMs);
+            const onAbort = () => {
+              clearTimeout(timer);
+              reject(args.signal.reason ?? new Error("Scenario aborted"));
+            };
+            args.signal.addEventListener("abort", onAbort, { once: true });
+          });
           details = { durationMs: step.durationMs, reason: step.reason };
           break;
 
         case "setNetwork":
+          if (config.artifacts.captureBeforeAfter && config.artifacts.screenshots !== "never") {
+            await args.captureScreenshot(`step-${index + 1}-setNetwork-before`).catch(() => {});
+          }
           if (step.custom) {
             await network.setProfile(
               { ...step.custom, name: step.custom.name ?? step.profile },
@@ -874,15 +933,30 @@ export class ScenarioExecutor {
               requireBandwidthThrottling: step.requireBandwidthThrottling,
             });
           }
+          if (config.artifacts.captureBeforeAfter && config.artifacts.screenshots !== "never") {
+            await args.captureScreenshot(`step-${index + 1}-setNetwork-after`).catch(() => {});
+          }
           details = { profile: step.profile };
           break;
 
         case "setOffline":
+          if (config.artifacts.captureBeforeAfter && config.artifacts.screenshots !== "never") {
+            await args.captureScreenshot(`step-${index + 1}-offline-before`).catch(() => {});
+          }
           await network.offline();
+          if (config.artifacts.captureBeforeAfter && config.artifacts.screenshots !== "never") {
+            await args.captureScreenshot(`step-${index + 1}-offline-after`).catch(() => {});
+          }
           break;
 
         case "setOnline":
+          if (config.artifacts.captureBeforeAfter && config.artifacts.screenshots !== "never") {
+            await args.captureScreenshot(`step-${index + 1}-online-before`).catch(() => {});
+          }
           await network.online();
+          if (config.artifacts.captureBeforeAfter && config.artifacts.screenshots !== "never") {
+            await args.captureScreenshot(`step-${index + 1}-online-after`).catch(() => {});
+          }
           break;
 
         case "injectFailure": {
@@ -1053,6 +1127,7 @@ export class ScenarioExecutor {
             min: step.min,
             max: step.max,
             method: step.method,
+            timeoutMs: step.timeoutMs,
           });
           break;
 
@@ -1061,11 +1136,47 @@ export class ScenarioExecutor {
             url: step.url,
             status: step.status,
             method: step.method,
+            timeoutMs: step.timeoutMs,
           });
           break;
 
         case "expectNoConsoleErrors":
           await assertions.expectNoConsoleErrors(step.ignorePatterns);
+          break;
+
+        case "expectNoFailedRequests":
+          await assertions.expectNoFailedRequests({
+            ignorePatterns: step.ignorePatterns,
+            includeInjected: step.includeInjected,
+          });
+          break;
+
+        case "expectServiceWorker":
+          await assertions.expectServiceWorker({
+            registered: step.registered,
+            controlled: step.controlled,
+            state: step.state,
+          });
+          break;
+
+        case "expectRetryPattern":
+          await assertions.expectRetryPattern({
+            url: step.url,
+            method: step.method,
+            minAttempts: step.minAttempts,
+            maxAttempts: step.maxAttempts,
+            minIntervalMs: step.minIntervalMs,
+            requireBackoff: step.requireBackoff,
+            timeoutMs: step.timeoutMs,
+          });
+          break;
+
+        case "expectMaxRequestDuration":
+          await assertions.expectMaxRequestDuration({
+            url: step.url,
+            maxDurationMs: step.maxDurationMs,
+            method: step.method,
+          });
           break;
 
         case "expectStorageValue":

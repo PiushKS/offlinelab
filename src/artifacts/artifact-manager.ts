@@ -318,6 +318,54 @@ export class ArtifactManager {
 
     return { deletedRuns, skipped: false };
   }
+
+  /**
+   * Automatically prunes stored runs exceeding `maxRuns` or older than `retentionDays`,
+   * preserving `keepRunId` and enforcing strict path safety.
+   */
+  async enforceRetention(options: {
+    retentionDays?: number;
+    maxRuns?: number;
+    keepRunId?: string;
+  }): Promise<string[]> {
+    if (options.retentionDays === undefined && options.maxRuns === undefined) {
+      return [];
+    }
+
+    let safeDir: string;
+    try {
+      safeDir = assertSafeReportDirectory(this.baseReportDir, this.cwd);
+    } catch {
+      return [];
+    }
+
+    const runs = await this.listRuns();
+    const cutoffMs =
+      options.retentionDays !== undefined
+        ? Date.now() - options.retentionDays * 86_400_000
+        : undefined;
+
+    const deleted: string[] = [];
+    for (let i = 0; i < runs.length; i++) {
+      const run = runs[i]!;
+      if (options.keepRunId && run.runId === options.keepRunId) {
+        continue;
+      }
+      const exceedsMax = options.maxRuns !== undefined && i >= options.maxRuns;
+      const expired = cutoffMs !== undefined && run.mtimeMs < cutoffMs;
+      if (exceedsMax || expired) {
+        try {
+          const verified = assertPathWithin(safeDir, path.join("runs", run.runId));
+          await fs.rm(verified, { recursive: true, force: true });
+          deleted.push(run.runId);
+        } catch {
+          // Ignore individual deletion failure
+        }
+      }
+    }
+
+    return deleted;
+  }
 }
 
 export function parseDurationString(input: string): number | undefined {

@@ -266,16 +266,28 @@ export class AssertionEngine {
     min?: number;
     max?: number;
     method?: string;
+    timeoutMs?: number;
   }): Promise<void> {
     await this.runAssertion(`expectRequestCount(${options.url})`, async () => {
-      const requests = this.deps.eventRecorder.getRequests().filter((req) => {
-        if (options.method && req.method.toUpperCase() !== options.method.toUpperCase()) {
-          return false;
-        }
-        return matchesUrlPattern(req.url, options.url) || req.url.includes(options.url);
-      });
+      const getCount = () =>
+        this.deps.eventRecorder.getRequests().filter((req) => {
+          if (options.method && req.method.toUpperCase() !== options.method.toUpperCase()) {
+            return false;
+          }
+          return matchesUrlPattern(req.url, options.url) || req.url.includes(options.url);
+        }).length;
 
-      const actual = requests.length;
+      const isSatisfied = (actual: number) =>
+        (options.count === undefined || actual === options.count) &&
+        (options.min === undefined || actual >= options.min) &&
+        (options.max === undefined || actual <= options.max);
+
+      const deadline = options.timeoutMs ? Date.now() + options.timeoutMs : 0;
+      let actual = getCount();
+      while (deadline > 0 && !isSatisfied(actual) && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100));
+        actual = getCount();
+      }
 
       if (options.count !== undefined && actual !== options.count) {
         throw new AssertionFailedError(
@@ -307,16 +319,28 @@ export class AssertionEngine {
     url: string;
     status: number;
     method?: string;
+    timeoutMs?: number;
   }): Promise<void> {
     await this.runAssertion(`expectResponseStatus(${options.url}, ${options.status})`, async () => {
-      const matching = this.deps.eventRecorder.getRequests().filter((req) => {
-        if (options.method && req.method.toUpperCase() !== options.method.toUpperCase()) {
-          return false;
-        }
-        return matchesUrlPattern(req.url, options.url) || req.url.includes(options.url);
-      });
+      const getStatuses = () =>
+        this.deps.eventRecorder
+          .getRequests()
+          .filter((req) => {
+            if (options.method && req.method.toUpperCase() !== options.method.toUpperCase()) {
+              return false;
+            }
+            return matchesUrlPattern(req.url, options.url) || req.url.includes(options.url);
+          })
+          .map((r) => r.status)
+          .filter((s): s is number => s !== undefined);
 
-      const statuses = matching.map((r) => r.status).filter((s): s is number => s !== undefined);
+      const deadline = options.timeoutMs ? Date.now() + options.timeoutMs : 0;
+      let statuses = getStatuses();
+      while (deadline > 0 && !statuses.includes(options.status) && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100));
+        statuses = getStatuses();
+      }
+
       if (!statuses.includes(options.status)) {
         throw new AssertionFailedError(
           `Expected a response with HTTP status ${options.status} matching "${options.url}", observed statuses: [${statuses.join(", ") || "none"}].`,
@@ -346,6 +370,188 @@ export class AssertionEngine {
       }
       return { expected: 0, actual: 0 };
     });
+  }
+
+  async expectNoFailedRequests(options?: {
+    ignorePatterns?: string[];
+    includeInjected?: boolean;
+  }): Promise<void> {
+    await this.runAssertion("expectNoFailedRequests()", async () => {
+      const compiled = (options?.ignorePatterns ?? []).map((p) => new RegExp(p));
+      const failed = this.deps.eventRecorder.getRequests().filter((r) => {
+        if (!r.failed) return false;
+        if (!options?.includeInjected && r.injectedRuleId) return false;
+        if (compiled.some((re) => re.test(r.url))) return false;
+        return true;
+      });
+
+      if (failed.length > 0) {
+        const preview = failed
+          .slice(0, 5)
+          .map((r) => `${r.method} ${r.url} (${r.status ?? r.failureReason ?? "failed"})`)
+          .join("; ");
+        throw new AssertionFailedError(
+          `Expected no failed network requests, but observed ${failed.length}: ${preview}`,
+          { expected: 0, actual: failed.length },
+        );
+      }
+      return { expected: 0, actual: 0 };
+    });
+  }
+
+  async expectServiceWorker(options?: {
+    registered?: boolean;
+    controlled?: boolean;
+    state?: "installing" | "installed" | "activating" | "activated";
+  }): Promise<void> {
+    await this.runAssertion("expectServiceWorker()", async () => {
+      const sw = await this.deps.swInspector.inspect(this.deps.page);
+      if (!sw.supported) {
+        throw new AssertionFailedError(
+          "Service Worker API is not supported or unavailable in this browser context.",
+        );
+      }
+      const hasReg = sw.registrations.length > 0;
+      if (options?.registered !== undefined && hasReg !== options.registered) {
+        throw new AssertionFailedError(
+          `Expected Service Worker registered=${options.registered}, observed ${hasReg} (${sw.registrations.length} registrations).`,
+          { expected: options.registered, actual: hasReg },
+        );
+      }
+      if (options?.controlled !== undefined && sw.controlled !== options.controlled) {
+        throw new AssertionFailedError(
+          `Expected Service Worker controlled=${options.controlled}, observed ${sw.controlled}.`,
+          { expected: options.controlled, actual: sw.controlled },
+        );
+      }
+      if (options?.state) {
+        const hasState = sw.registrations.some(
+          (r) =>
+            r.activeState === options.state ||
+            r.waitingState === options.state ||
+            r.installingState === options.state,
+        );
+        if (!hasState) {
+          throw new AssertionFailedError(
+            `Expected a Service Worker in state "${options.state}", observed registrations: ${JSON.stringify(sw.registrations)}.`,
+            { expected: options.state, actual: sw.registrations },
+          );
+        }
+      }
+      return { expected: options ?? { registered: true }, actual: { controlled: sw.controlled, count: sw.registrations.length } };
+    });
+  }
+
+  async expectRetryPattern(options: {
+    url: string;
+    method?: string;
+    minAttempts: number;
+    maxAttempts?: number;
+    minIntervalMs?: number;
+    requireBackoff?: boolean;
+    timeoutMs?: number;
+  }): Promise<void> {
+    await this.runAssertion(`expectRetryPattern(${options.url})`, async () => {
+      const getMatching = () =>
+        this.deps.eventRecorder
+          .getRequests()
+          .filter((req) => {
+            if (options.method && req.method.toUpperCase() !== options.method.toUpperCase()) {
+              return false;
+            }
+            return matchesUrlPattern(req.url, options.url) || req.url.includes(options.url);
+          })
+          .sort((a, b) => a.elapsedMs - b.elapsedMs);
+
+      const deadline = options.timeoutMs ? Date.now() + options.timeoutMs : 0;
+      let matching = getMatching();
+      while (deadline > 0 && matching.length < options.minAttempts && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100));
+        matching = getMatching();
+      }
+
+      if (matching.length < options.minAttempts) {
+        throw new AssertionFailedError(
+          `Expected at least ${options.minAttempts} retry attempt(s) for "${options.url}", observed ${matching.length}.`,
+          { expected: `>= ${options.minAttempts}`, actual: matching.length },
+        );
+      }
+
+      if (options.maxAttempts !== undefined && matching.length > options.maxAttempts) {
+        throw new AssertionFailedError(
+          `Expected at most ${options.maxAttempts} retry attempt(s) for "${options.url}", observed ${matching.length}.`,
+          { expected: `<= ${options.maxAttempts}`, actual: matching.length },
+        );
+      }
+
+      const intervals: number[] = [];
+      for (let i = 1; i < matching.length; i++) {
+        intervals.push(Math.max(0, Math.round((matching[i]!.elapsedMs - matching[i - 1]!.elapsedMs) * 100) / 100));
+      }
+
+      if (options.minIntervalMs !== undefined) {
+        const tooFast = intervals.find((iv) => iv < options.minIntervalMs!);
+        if (tooFast !== undefined) {
+          throw new AssertionFailedError(
+            `Expected retry interval >= ${options.minIntervalMs}ms for "${options.url}", but observed ${tooFast}ms (intervals: [${intervals.join(", ")}]ms).`,
+            { expected: `>= ${options.minIntervalMs}ms`, actual: intervals },
+          );
+        }
+      }
+
+      if (options.requireBackoff && intervals.length >= 2) {
+        for (let i = 1; i < intervals.length; i++) {
+          // Allow small 15ms timer jitter while verifying non-decreasing backoff
+          if (intervals[i]! + 15 < intervals[i - 1]!) {
+            throw new AssertionFailedError(
+              `Expected increasing retry backoff intervals for "${options.url}", but observed [${intervals.join(", ")}]ms.`,
+              { expected: "increasing backoff intervals", actual: intervals },
+            );
+          }
+        }
+      }
+
+      return { expected: options.minAttempts, actual: { attempts: matching.length, intervalsMs: intervals } };
+    });
+  }
+
+  async expectMaxRequestDuration(options: {
+    url: string;
+    maxDurationMs: number;
+    method?: string;
+  }): Promise<void> {
+    await this.runAssertion(
+      `expectMaxRequestDuration(${options.url}, <=${options.maxDurationMs}ms)`,
+      async () => {
+        const matching = this.deps.eventRecorder.getRequests().filter((req) => {
+          if (options.method && req.method.toUpperCase() !== options.method.toUpperCase()) {
+            return false;
+          }
+          return matchesUrlPattern(req.url, options.url) || req.url.includes(options.url);
+        });
+
+        const durations = matching
+          .map((r) => r.durationMs)
+          .filter((d): d is number => d !== undefined);
+
+        if (durations.length === 0) {
+          throw new AssertionFailedError(
+            `No completed requests with measured duration matched "${options.url}".`,
+            { expected: `<= ${options.maxDurationMs}ms`, actual: "none" },
+          );
+        }
+
+        const slowest = Math.max(...durations);
+        if (slowest > options.maxDurationMs) {
+          throw new AssertionFailedError(
+            `Slowest request matching "${options.url}" took ${slowest}ms, exceeding budget of ${options.maxDurationMs}ms.`,
+            { expected: `<= ${options.maxDurationMs}ms`, actual: slowest },
+          );
+        }
+
+        return { expected: `<= ${options.maxDurationMs}ms`, actual: slowest };
+      },
+    );
   }
 
   async expectStorageValue(options: {
@@ -783,6 +989,10 @@ export class AssertionEngine {
     }) as OfflineLabExpect;
 
     expectFn.noConsoleErrors = (ignorePatterns) => this.expectNoConsoleErrors(ignorePatterns);
+    expectFn.noFailedRequests = (opts) => this.expectNoFailedRequests(opts);
+    expectFn.serviceWorker = (opts) => this.expectServiceWorker(opts);
+    expectFn.retryPattern = (opts) => this.expectRetryPattern(opts);
+    expectFn.maxRequestDuration = (opts) => this.expectMaxRequestDuration(opts);
     expectFn.cacheContains = (urlPattern, cacheName) =>
       this.expectCacheContains(urlPattern, cacheName);
     expectFn.indexedDBRecord = (opts) => this.expectIndexedDBRecord(opts);

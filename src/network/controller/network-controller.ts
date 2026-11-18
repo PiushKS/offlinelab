@@ -1,5 +1,5 @@
 import { performance } from "node:perf_hooks";
-import type { BrowserContext, Page, Request, Route } from "playwright";
+import type { BrowserContext, Page, Request, Route, WebSocket } from "playwright";
 import type { BrowserAdapter, ChromiumCdpNetworkAdapter } from "../../browser/adapters/browser-adapter.js";
 import { UnsupportedCapabilityError } from "../../core/errors/index.js";
 import type { EventRecorder } from "../../core/events/event-recorder.js";
@@ -52,12 +52,15 @@ export class NetworkController implements ScenarioNetworkAPI {
   private requestTimingMap = new WeakMap<Request, { id: string; startMs: number }>();
   private disposed = false;
 
-  // Bound Playwright event listeners for clean disposal
+  // Bound Playwright event listeners per attached page for multi-tab/popup observability & clean disposal
+  private readonly observedPages = new Set<Page>();
+  private onContextPageListener?: (newPage: Page) => void;
   private onRequestListener?: (req: Request) => void;
   private onRequestFinishedListener?: (req: Request) => void;
   private onRequestFailedListener?: (req: Request) => void;
   private onConsoleListener?: (msg: { type(): string; text(): string; location(): { url?: string } }) => void;
   private onPageErrorListener?: (err: Error) => void;
+  private onWebSocketListener?: (ws: WebSocket) => void;
 
   constructor(options: NetworkControllerOptions) {
     this.context = options.context;
@@ -69,6 +72,18 @@ export class NetworkController implements ScenarioNetworkAPI {
     this.signal = options.signal;
 
     this.attachObservers();
+  }
+
+  private attachPageObservers(targetPage: Page): void {
+    if (this.observedPages.has(targetPage)) return;
+    this.observedPages.add(targetPage);
+    if (this.onRequestListener) targetPage.on("request", this.onRequestListener);
+    if (this.onRequestFinishedListener)
+      targetPage.on("requestfinished", this.onRequestFinishedListener);
+    if (this.onRequestFailedListener) targetPage.on("requestfailed", this.onRequestFailedListener);
+    if (this.onConsoleListener) targetPage.on("console", this.onConsoleListener);
+    if (this.onPageErrorListener) targetPage.on("pageerror", this.onPageErrorListener);
+    if (this.onWebSocketListener) targetPage.on("websocket", this.onWebSocketListener);
   }
 
   private attachObservers(): void {
@@ -158,11 +173,25 @@ export class NetworkController implements ScenarioNetworkAPI {
       this.eventRecorder.recordConsole("pageerror", err.message);
     };
 
-    this.page.on("request", this.onRequestListener);
-    this.page.on("requestfinished", this.onRequestFinishedListener);
-    this.page.on("requestfailed", this.onRequestFailedListener);
-    this.page.on("console", this.onConsoleListener);
-    this.page.on("pageerror", this.onPageErrorListener);
+    this.onWebSocketListener = (ws: WebSocket) => {
+      this.eventRecorder.record("websocket.opened", { url: ws.url() });
+      ws.on("close", () => {
+        this.eventRecorder.record("websocket.closed", { url: ws.url() });
+      });
+      ws.on("socketerror", (errText) => {
+        this.eventRecorder.record(
+          "websocket.error",
+          { url: ws.url(), error: errText },
+          "warning",
+        );
+      });
+    };
+
+    this.attachPageObservers(this.page);
+    this.onContextPageListener = (newPage: Page) => {
+      this.attachPageObservers(newPage);
+    };
+    this.context.on("page", this.onContextPageListener);
   }
 
   private async ensureRouteInterception(): Promise<void> {
@@ -677,12 +706,20 @@ export class NetworkController implements ScenarioNetworkAPI {
     this.stopUnstableTimer();
     this.faultEngine.clearRules();
 
-    if (this.onRequestListener) this.page.off("request", this.onRequestListener);
-    if (this.onRequestFinishedListener)
-      this.page.off("requestfinished", this.onRequestFinishedListener);
-    if (this.onRequestFailedListener) this.page.off("requestfailed", this.onRequestFailedListener);
-    if (this.onConsoleListener) this.page.off("console", this.onConsoleListener);
-    if (this.onPageErrorListener) this.page.off("pageerror", this.onPageErrorListener);
+    if (this.onContextPageListener) {
+      this.context.off("page", this.onContextPageListener);
+    }
+
+    for (const observed of this.observedPages) {
+      if (this.onRequestListener) observed.off("request", this.onRequestListener);
+      if (this.onRequestFinishedListener)
+        observed.off("requestfinished", this.onRequestFinishedListener);
+      if (this.onRequestFailedListener) observed.off("requestfailed", this.onRequestFailedListener);
+      if (this.onConsoleListener) observed.off("console", this.onConsoleListener);
+      if (this.onPageErrorListener) observed.off("pageerror", this.onPageErrorListener);
+      if (this.onWebSocketListener) observed.off("websocket", this.onWebSocketListener);
+    }
+    this.observedPages.clear();
 
     if (this.routeInstalled && this.routeHandler) {
       await this.context.unroute("**/*", this.routeHandler).catch(() => {});

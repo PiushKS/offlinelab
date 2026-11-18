@@ -58,10 +58,13 @@ export class TerminalRenderer {
   writeScenarioResult(result: ScenarioResult): void {
     if (this.jsonMode || this.logLevel === "quiet") return;
 
-    const statusLabel = this.formatStatusBadge(result.status);
+    const statusLabel = result.flaky
+      ? this.style(pc.yellow, "FLKY")
+      : this.formatStatusBadge(result.status);
     const duration = this.formatDuration(result.durationMs);
     const browserTag = this.style(pc.dim, `[${result.browser}]`);
-    const line = `${statusLabel}  ${result.name} ${browserTag} ${this.style(pc.dim, duration)}`;
+    const retryNote = result.flaky ? this.style(pc.yellow, ` (passed on attempt ${result.attempts})`) : "";
+    const line = `${statusLabel}  ${result.name} ${browserTag} ${this.style(pc.dim, duration)}${retryNote}`;
     this.stdout.write(line + "\n");
 
     if (result.status === "failed" && result.error) {
@@ -105,6 +108,9 @@ export class TerminalRenderer {
       `Failed                ${report.summary.failed > 0 ? this.style(pc.red, String(report.summary.failed)) : "0"}`,
     ];
 
+    if (report.summary.flaky > 0) {
+      lines.push(`Flaky (retried)       ${this.style(pc.yellow, String(report.summary.flaky))}`);
+    }
     if (report.summary.skipped > 0) {
       lines.push(`Skipped               ${report.summary.skipped}`);
     }

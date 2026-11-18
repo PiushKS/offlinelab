@@ -14,6 +14,7 @@ import { runPresetListCommand, runPresetShowCommand } from "./commands/preset.js
 import {
   runReportCompareCommand,
   runReportListCommand,
+  runReportMergeCommand,
   runReportOpenCommand,
 } from "./commands/report.js";
 import { runExecuteCommand } from "./commands/run.js";
@@ -66,6 +67,13 @@ export function createCliProgram(): Command {
     .option("-u, --url <url>", "Target application URL (triggers zero-config inspection if no scenarios specified)")
     .option("-s, --scenario <name>", "Run specific scenario by name (repeatable)", collectList, [])
     .option("-p, --pattern <regex>", "Filter scenarios by regex pattern")
+    .option("-t, --tag <tag>", "Filter scenarios by tag (repeatable)", collectList, [])
+    .option("--shard <index/total>", "Run a deterministic CI shard (e.g. 1/4)")
+    .option("--bail", "Stop scheduling remaining scenarios after the first failure")
+    .option("--max-failures <count>", "Stop scheduling remaining scenarios after N failures")
+    .option("--fail-on-flaky", "Exit nonzero if any scenario passed only after retrying")
+    .option("--ignore-https-errors", "Allow self-signed TLS certificates in staging environments")
+    .option("--proxy <server>", "Route browser traffic through an HTTP(S)/SOCKS proxy server")
     .option("-b, --browser <name>", "Browser(s): chromium, firefox, webkit (repeatable or comma-separated)", collectList, [])
     .option("--profile <name>", "Override initial network profile")
     .option("--device <name>", "Playwright mobile device descriptor (e.g. 'iPhone 15')")
@@ -176,6 +184,19 @@ export function createCliProgram(): Command {
     .option("--json", "Output comparison as JSON")
     .action(async (runA: string, runB: string, opts) => {
       await runReportCompareCommand(runA, runB, opts);
+    });
+
+  reportCmd
+    .command("merge <inputs...>")
+    .description("Merge multiple sharded report.json files or run directories into a unified HTML/JSON/JUnit report")
+    .option("-c, --config <path>", "Path to OfflineLab config file")
+    .option("--report-dir <dir>", "Output report directory")
+    .option("--json", "Output merged report JSON to stdout")
+    .action(async (inputs: string[], opts) => {
+      const ok = await runReportMergeCommand(inputs, opts);
+      if (!ok) {
+        process.exitCode = ExitCode.ASSERTION_FAILURE;
+      }
     });
 
   program

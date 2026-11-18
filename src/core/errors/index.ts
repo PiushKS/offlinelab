@@ -4,6 +4,7 @@ export const ExitCode = {
   INVALID_CONFIG: 2,
   INFRASTRUCTURE_ERROR: 3,
   INTERRUPTED: 130,
+  TERMINATED: 143,
 } as const;
 
 export type ExitCodeValue = (typeof ExitCode)[keyof typeof ExitCode];

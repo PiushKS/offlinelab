@@ -131,6 +131,7 @@ export class ScenarioDiscovery {
     cwd: string;
     filterNames?: string[];
     filterPattern?: string;
+    filterTags?: string[];
   }): Promise<ScenarioDefinition[]> {
     const files = await ScenarioDiscovery.discoverFiles(options.patterns, options.cwd);
     const scenarios: ScenarioDefinition[] = [];
@@ -140,13 +141,19 @@ export class ScenarioDiscovery {
       scenarios.push(scenario);
     }
 
-    return ScenarioDiscovery.filterScenarios(scenarios, options.filterNames, options.filterPattern);
+    return ScenarioDiscovery.filterScenarios(
+      scenarios,
+      options.filterNames,
+      options.filterPattern,
+      options.filterTags,
+    );
   }
 
   static filterScenarios(
     scenarios: ScenarioDefinition[],
     filterNames?: string[],
     filterPattern?: string,
+    filterTags?: string[],
   ): ScenarioDefinition[] {
     let result = scenarios;
 
@@ -156,6 +163,13 @@ export class ScenarioDiscovery {
         (s) =>
           nameSet.has(s.name.toLowerCase()) ||
           (s.sourcePath ? nameSet.has(path.basename(s.sourcePath).toLowerCase()) : false),
+      );
+    }
+
+    if (filterTags && filterTags.length > 0) {
+      const requiredTags = new Set(filterTags.map((t) => t.toLowerCase()));
+      result = result.filter((s) =>
+        Boolean(s.tags?.some((t) => requiredTags.has(t.toLowerCase()))),
       );
     }
 

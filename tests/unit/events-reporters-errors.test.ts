@@ -41,6 +41,7 @@ function makeSampleReport(overrides?: Partial<RunReport>): RunReport {
       total: 3,
       passed: 1,
       failed: 1,
+      flaky: 0,
       skipped: 0,
       unsupported: 1,
       totalAssertions: 2,

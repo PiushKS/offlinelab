@@ -6,6 +6,8 @@ import { ArtifactManager } from "../../artifacts/artifact-manager.js";
 import { ConfigLoader } from "../../config/loader/config-loader.js";
 import { ConfigValidationError } from "../../core/errors/index.js";
 import { JsonReporter } from "../../reporters/json/json-reporter.js";
+import { ReportGenerator } from "../../reporters/report-generator.js";
+import type { RunReport } from "../../types/index.js";
 
 async function resolveReportDir(options: {
   reportDir?: string;
@@ -164,4 +166,52 @@ export async function runReportCompareCommand(
       `${label}  ${sc.name} [${sc.browser}]: ${sc.statusA ?? "-"} -> ${sc.statusB ?? "-"}${durPart}${reqPart}`,
     );
   }
+}
+
+export async function runReportMergeCommand(
+  inputs: string[],
+  options: { reportDir?: string; config?: string; json?: boolean; cwd?: string },
+): Promise<boolean> {
+  if (inputs.length === 0) {
+    throw new ConfigValidationError(
+      "Specify at least one report.json file or run directory to merge.",
+    );
+  }
+
+  const { reportDir, cwd } = await resolveReportDir(options);
+  const reports: RunReport[] = [];
+
+  for (const input of inputs) {
+    const resolved = path.resolve(cwd, input);
+    let targetFile = resolved;
+    try {
+      const stat = await fs.stat(resolved);
+      if (stat.isDirectory()) {
+        targetFile = path.join(resolved, "report.json");
+      }
+    } catch {
+      throw new ConfigValidationError(`Report input not found: ${resolved}`);
+    }
+    reports.push(await JsonReporter.read(targetFile));
+  }
+
+  const merged = JsonReporter.mergeReports(reports);
+  const manager = new ArtifactManager(reportDir, cwd);
+  const layout = await manager.initRun(merged.runId);
+  const generator = new ReportGenerator();
+  const paths = await generator.generate(merged, layout, ["html", "json", "junit"]);
+  await manager.writeRunMetadata(layout, merged);
+
+  if (options.json) {
+    console.log(JSON.stringify(merged, null, 2));
+  } else {
+    console.log(
+      `Merged ${reports.length} report(s) into ${merged.runId} (${merged.summary.passed}/${merged.summary.total} passed, ${merged.summary.failed} failed).`,
+    );
+    if (paths.topLevelHtml) console.log(`HTML report:  ${paths.topLevelHtml}`);
+    if (paths.topLevelJson) console.log(`JSON report:  ${paths.topLevelJson}`);
+    if (paths.topLevelJunit) console.log(`JUnit report: ${paths.topLevelJunit}`);
+  }
+
+  return merged.summary.failed === 0;
 }

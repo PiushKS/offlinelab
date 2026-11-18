@@ -453,6 +453,10 @@ steps:                                # Required non-empty array of steps
 | `expectRequestCount` | `url`, `count?`, `min?`, `max?`, `method?` | Asserts the number of recorded requests matching `url` (and optional `method`). |
 | `expectResponseStatus` | `url`, `status`, `method?` | Asserts at least one matching request received HTTP `status`. |
 | `expectNoConsoleErrors` | `ignorePatterns?` | Asserts zero browser `console.error` / `pageerror` entries (excluding matching regexes). |
+| `expectNoFailedRequests` | `ignorePatterns?`, `includeInjected?` | Asserts zero uninjected failed network requests (or all failed requests when `includeInjected: true`). |
+| `expectServiceWorker` | `registered?`, `controlled?`, `state?` | Asserts Service Worker registration, controller status, and lifecycle state. |
+| `expectRetryPattern` | `url`, `minAttempts`, `maxAttempts?`, `method?`, `minIntervalMs?`, `requireBackoff?`, `timeoutMs?` | Verifies client retry count, minimum interval, and optional exponential backoff spacing. |
+| `expectMaxRequestDuration` | `url`, `maxDurationMs`, `method?` | Enforces an SLA maximum request duration budget across matching completed requests. |
 | `expectStorageValue` | `storage` (`localStorage`\|`sessionStorage`), `key`, `value?`, `exists?` | Asserts existence, absence (`exists: false`), or exact string value of a storage key. |
 | `expectCacheContains` | `urlPattern`, `cacheName?` | Asserts Cache Storage contains at least one entry matching `urlPattern`. |
 | `expectIndexedDBRecord` | `database`, `store`, `count?`, `minCount?`, `match?`, `timeoutMs?` | Polls IndexedDB until matching record count satisfies `count` / `minCount` / field `match`. |
@@ -1154,6 +1158,13 @@ Running `offlinelab` with no arguments opens an interactive action menu in a TTY
 | `-u, --url <url>` | Target URL (triggers Mode A zero-config inspection when no scenarios/config are passed) |
 | `-s, --scenario <name>` | Run specific scenario by name or filename (repeatable) |
 | `-p, --pattern <regex>` | Filter scenarios by name, description, or tag |
+| `-t, --tag <tag>` | Filter scenarios by tag (repeatable) |
+| `--shard <index/total>` | Execute a deterministic horizontal CI shard (e.g. `1/4`) |
+| `--bail` | Stop scheduling remaining scenarios after the first failure |
+| `--max-failures <count>` | Stop scheduling remaining scenarios after N failures |
+| `--fail-on-flaky` | Exit nonzero (`1`) if any scenario passed only after retrying |
+| `--ignore-https-errors` | Allow self-signed TLS certificates in corporate/staging environments |
+| `--proxy <server>` | Route browser traffic through an HTTP(S)/SOCKS proxy server |
 | `-b, --browser <name>` | Target browser(s): `chromium`, `firefox`, `webkit` (repeatable or comma-separated) |
 | `--profile <name>` | Override initial network profile |
 | `--device <name>` | Playwright mobile device descriptor (e.g. `"iPhone 15"`) |
@@ -1183,6 +1194,7 @@ Running `offlinelab` with no arguments opens an interactive action menu in a TTY
 | `offlinelab report list [--report-dir <dir>] [--json]` | List stored run IDs and timestamps |
 | `offlinelab report open [--run latest\|<id>] [--no-open]` | Open (or print path of) a generated HTML report |
 | `offlinelab report compare <runA> <runB> [--json]` | Diff scenario statuses, durations, and failed requests |
+| `offlinelab report merge <inputs...> [--report-dir <dir>] [--json]` | Merge sharded `report.json` files or run directories into one unified HTML/JSON/JUnit report |
 | `offlinelab clean [--older-than <duration>] [--report-dir <dir>] [--json]` | Safely delete OfflineLab-managed run artifacts |
 
 ---
@@ -1233,6 +1245,7 @@ jobs:
 | `2` | `ExitCode.INVALID_CONFIG` | Invalid CLI arguments, configuration schema, YAML syntax, or unsafe path |
 | `3` | `ExitCode.INFRASTRUCTURE_ERROR` | Environment/infrastructure error (missing browser binary, launch failure, webServer failure) |
 | `130` | `ExitCode.INTERRUPTED` | Interrupted by `SIGINT` (Ctrl+C) after resource cleanup |
+| `143` | `ExitCode.TERMINATED` | Gracefully terminated by `SIGTERM` (Docker/Kubernetes/CI cancellation) after cleanup |
 
 ---
 

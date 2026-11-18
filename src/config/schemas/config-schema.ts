@@ -64,6 +64,24 @@ export const WebServerSchema = z
     reuseExistingServer: z.boolean().optional(),
     env: z.record(z.string()).optional(),
     gracefulShutdownMs: z.number().int().min(100).max(30_000).optional(),
+    readyStatusCodes: z.array(z.number().int().min(100).max(599)).min(1).optional(),
+  })
+  .strict();
+
+export const ProxyConfigSchema = z
+  .object({
+    server: z.string().min(1),
+    bypass: z.string().optional(),
+    username: z.string().optional(),
+    password: z.string().optional(),
+  })
+  .strict();
+
+export const BudgetsConfigSchema = z
+  .object({
+    maxRunDurationMs: z.number().int().min(100).max(3_600_000).optional(),
+    maxConsoleErrors: z.number().int().min(0).max(10_000).optional(),
+    maxUninjectedFailedRequests: z.number().int().min(0).max(10_000).optional(),
   })
   .strict();
 
@@ -130,8 +148,16 @@ export const OfflineLabConfigSchema = z
     timeouts: TimeoutsSchema.optional(),
     headless: z.boolean().optional(),
     device: z.union([z.string().min(1), DeviceConfigSchema]).optional(),
+    proxy: ProxyConfigSchema.optional(),
+    ignoreHTTPSErrors: z.boolean().optional(),
+    extraHTTPHeaders: z.record(z.string()).optional(),
+    locale: z.string().min(2).max(32).optional(),
+    timezoneId: z.string().min(1).max(64).optional(),
     networkProfiles: z.record(NetworkProfileSchema.partial()).optional(),
     unsupportedPolicy: UnsupportedPolicySchema.optional(),
+    maxFailures: z.number().int().min(0).max(10_000).optional(),
+    failOnFlaky: z.boolean().optional(),
+    budgets: BudgetsConfigSchema.optional(),
     reports: ReportsSchema.optional(),
     artifacts: ArtifactsSchema.optional(),
     redaction: RedactionSchema.optional(),
@@ -184,8 +210,16 @@ export class ConfigValidator {
       },
       headless: data.headless ?? DEFAULT_CONFIG.headless,
       device: data.device,
+      proxy: data.proxy,
+      ignoreHTTPSErrors: data.ignoreHTTPSErrors,
+      extraHTTPHeaders: data.extraHTTPHeaders,
+      locale: data.locale,
+      timezoneId: data.timezoneId,
       networkProfiles: data.networkProfiles,
       unsupportedPolicy: data.unsupportedPolicy ?? DEFAULT_CONFIG.unsupportedPolicy,
+      maxFailures: data.maxFailures,
+      failOnFlaky: data.failOnFlaky,
+      budgets: data.budgets,
       reports: {
         directory: data.reports?.directory ?? DEFAULT_CONFIG.reports.directory,
         formats: data.reports?.formats ?? [...DEFAULT_CONFIG.reports.formats],

@@ -13,6 +13,7 @@ import { BrowserLaunchError, ConfigValidationError } from "../../core/errors/ind
 import type {
   BrowserName,
   DeviceConfig,
+  ProxyConfig,
   ServiceWorkerPolicy,
 } from "../../types/index.js";
 import { BrowserAdapter } from "../adapters/browser-adapter.js";
@@ -23,6 +24,11 @@ export interface CreateContextOptions {
   baseURL?: string;
   serviceWorkers: ServiceWorkerPolicy;
   device?: string | DeviceConfig;
+  proxy?: ProxyConfig;
+  ignoreHTTPSErrors?: boolean;
+  extraHTTPHeaders?: Record<string, string>;
+  locale?: string;
+  timezoneId?: string;
   storageState?: string;
   persistentProfileDir?: string;
   timeoutMs?: number;
@@ -140,6 +146,13 @@ export class BrowserManager {
       ...deviceOptions,
       baseURL: options.baseURL,
       serviceWorkers: options.serviceWorkers,
+      ...(options.proxy ? { proxy: options.proxy } : {}),
+      ...(options.ignoreHTTPSErrors !== undefined
+        ? { ignoreHTTPSErrors: options.ignoreHTTPSErrors }
+        : {}),
+      ...(options.extraHTTPHeaders ? { extraHTTPHeaders: options.extraHTTPHeaders } : {}),
+      ...(options.locale ? { locale: options.locale } : {}),
+      ...(options.timezoneId ? { timezoneId: options.timezoneId } : {}),
       ...(options.storageState ? { storageState: options.storageState } : {}),
     };
 

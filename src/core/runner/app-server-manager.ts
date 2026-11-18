@@ -17,7 +17,7 @@ export class AppServerManager {
     const timeoutMs = config.timeoutMs ?? 30_000;
     const reuse = config.reuseExistingServer ?? true;
 
-    if (reuse && (await this.isReachable(config.url))) {
+    if (reuse && (await this.isReachable(config.url, config.readyStatusCodes))) {
       this.startedByUs = false;
       return { reused: true };
     }
@@ -84,7 +84,7 @@ export class AppServerManager {
         );
       }
 
-      if (await this.isReachable(config.url)) {
+      if (await this.isReachable(config.url, config.readyStatusCodes)) {
         return { reused: false };
       }
 
@@ -155,7 +155,7 @@ export class AppServerManager {
     });
   }
 
-  async isReachable(url: string): Promise<boolean> {
+  async isReachable(url: string, readyStatusCodes?: number[]): Promise<boolean> {
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 1500);
@@ -165,7 +165,10 @@ export class AppServerManager {
         redirect: "manual",
       });
       clearTimeout(timer);
-      return res.status > 0;
+      if (readyStatusCodes && readyStatusCodes.length > 0) {
+        return readyStatusCodes.includes(res.status);
+      }
+      return res.status >= 100 && res.status < 500;
     } catch {
       return false;
     }

@@ -33,10 +33,21 @@ export function getInstalledPlaywrightVersion(): string {
   }
 }
 
+export interface ShardConfig {
+  /** 1-based shard index (1..total) */
+  index: number;
+  /** Total number of shards (>= 1) */
+  total: number;
+}
+
 export interface RunnerExecutionOptions {
   scenarios?: ScenarioDefinition[];
   scenarioNames?: string[];
   scenarioPattern?: string;
+  tags?: string[];
+  shard?: ShardConfig;
+  maxFailures?: number;
+  failOnFlaky?: boolean;
   profileOverride?: string;
   inspectUrl?: string;
   signal?: AbortSignal;
@@ -102,6 +113,7 @@ export class OfflineLabRunner {
         options.scenarios,
         options.scenarioNames,
         options.scenarioPattern,
+        options.tags,
       );
     } else {
       scenariosToRun = await ScenarioDiscovery.discover({
@@ -109,11 +121,26 @@ export class OfflineLabRunner {
         cwd,
         filterNames: options.scenarioNames,
         filterPattern: options.scenarioPattern,
+        filterTags: options.tags,
       });
     }
 
-    const tasks = this.expandTasks(scenariosToRun);
+    let tasks = this.expandTasks(scenariosToRun);
+
+    // Deterministic horizontal CI sharding
+    if (options.shard) {
+      const { index, total } = options.shard;
+      const totalBefore = tasks.length;
+      tasks = tasks.filter((_, idx) => idx % total === index - 1);
+      runNotes.push(
+        `CI Shard ${index}/${total}: selected ${tasks.length} of ${totalBefore} scenario task(s).`,
+      );
+    }
+
     const results: ScenarioResult[] = new Array(tasks.length);
+    const maxFailures = options.maxFailures ?? this.config.maxFailures ?? 0;
+    let failureCount = 0;
+    let bailedEarly = false;
 
     const runAbort = new AbortController();
     const runTimeoutMs = this.config.timeouts?.runMs;
@@ -148,7 +175,7 @@ export class OfflineLabRunner {
 
       const worker = async () => {
         while (true) {
-          if (runAbort.signal.aborted) break;
+          if (runAbort.signal.aborted || bailedEarly) break;
           const idx = cursor++;
           if (idx >= tasks.length) break;
           const task = tasks[idx]!;
@@ -168,6 +195,16 @@ export class OfflineLabRunner {
           });
           results[idx] = res;
           options.onScenarioComplete?.(res);
+
+          if (res.status === "failed") {
+            failureCount += 1;
+            if (maxFailures > 0 && failureCount >= maxFailures && !bailedEarly) {
+              bailedEarly = true;
+              runNotes.push(
+                `Stopped scheduling remaining scenarios after reaching maxFailures=${maxFailures}.`,
+              );
+            }
+          }
         }
       };
 
@@ -220,9 +257,33 @@ export class OfflineLabRunner {
     );
     await artifactManager.writeRunMetadata(layout, report);
 
+    // Automatically enforce retention policy so CI/local disks do not grow unbounded
+    await artifactManager
+      .enforceRetention({
+        retentionDays: this.config.reports.retentionDays,
+        maxRuns: this.config.reports.maxRuns,
+        keepRunId: runId,
+      })
+      .catch(() => {
+        // Retention pruning errors should not discard test results
+      });
+
+    const failOnFlaky = options.failOnFlaky ?? this.config.failOnFlaky ?? false;
+    const budgetExceeded =
+      this.config.budgets?.maxRunDurationMs !== undefined &&
+      durationMs > this.config.budgets.maxRunDurationMs;
+    if (budgetExceeded) {
+      report.notes = [
+        ...(report.notes ?? []),
+        `Run duration (${durationMs}ms) exceeded configured budget (${this.config.budgets!.maxRunDurationMs}ms).`,
+      ];
+    }
+
     const hasUnsupportedFailure =
       this.config.unsupportedPolicy === "fail" && summary.unsupported > 0;
-    const hasFailures = summary.failed > 0 || hasUnsupportedFailure;
+    const hasFlakyFailure = failOnFlaky && summary.flaky > 0;
+    const hasFailures =
+      summary.failed > 0 || hasUnsupportedFailure || hasFlakyFailure || budgetExceeded;
 
     return {
       report,
@@ -251,6 +312,7 @@ export class OfflineLabRunner {
   private computeSummary(scenarios: ScenarioResult[]): RunSummary {
     let passed = 0;
     let failed = 0;
+    let flaky = 0;
     let skipped = 0;
     let unsupported = 0;
     let totalAssertions = 0;
@@ -261,8 +323,10 @@ export class OfflineLabRunner {
     let injectedFaults = 0;
 
     for (const s of scenarios) {
-      if (s.status === "passed") passed += 1;
-      else if (s.status === "failed") failed += 1;
+      if (s.status === "passed") {
+        passed += 1;
+        if (s.flaky) flaky += 1;
+      } else if (s.status === "failed") failed += 1;
       else if (s.status === "skipped") skipped += 1;
       else if (s.status === "unsupported") unsupported += 1;
 
@@ -279,6 +343,7 @@ export class OfflineLabRunner {
       total: scenarios.length,
       passed,
       failed,
+      flaky,
       skipped,
       unsupported,
       totalAssertions,

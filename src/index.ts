@@ -13,6 +13,7 @@ export {
   getInstalledPlaywrightVersion,
   type RunnerExecutionOptions,
   type RunnerExecutionOutput,
+  type ShardConfig,
 } from "./core/runner/runner.js";
 export { AppServerManager } from "./core/runner/app-server-manager.js";
 export {

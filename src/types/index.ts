@@ -279,6 +279,24 @@ export interface WebServerConfig {
   reuseExistingServer?: boolean;
   env?: Record<string, string>;
   gracefulShutdownMs?: number;
+  /** HTTP status codes considered healthy during startup polling (default: any 100..499) */
+  readyStatusCodes?: number[];
+}
+
+export interface ProxyConfig {
+  server: string;
+  bypass?: string;
+  username?: string;
+  password?: string;
+}
+
+export interface BudgetsConfig {
+  /** Fail run if total duration exceeds this threshold */
+  maxRunDurationMs?: number;
+  /** Fail scenario if browser console errors exceed this count */
+  maxConsoleErrors?: number;
+  /** Fail scenario if uninjected failed network requests exceed this count */
+  maxUninjectedFailedRequests?: number;
 }
 
 export interface RedactionConfig {
@@ -333,8 +351,24 @@ export interface OfflineLabConfig {
   timeouts?: TimeoutsConfig;
   headless: boolean;
   device?: string | DeviceConfig;
+  /** Optional corporate/staging HTTP(S)/SOCKS proxy configuration */
+  proxy?: ProxyConfig;
+  /** Allow self-signed TLS certificates in corporate/staging environments */
+  ignoreHTTPSErrors?: boolean;
+  /** Extra HTTP headers sent on every browser request (sensitive values redacted in reports) */
+  extraHTTPHeaders?: Record<string, string>;
+  /** Browser context locale (e.g. "en-US", "de-DE") */
+  locale?: string;
+  /** Browser context IANA timezone (e.g. "UTC", "America/New_York") */
+  timezoneId?: string;
   networkProfiles?: Record<string, Partial<NetworkProfileConfig>>;
   unsupportedPolicy: UnsupportedCapabilityPolicy;
+  /** Stop executing remaining scenarios after N failures (0 = disabled) */
+  maxFailures?: number;
+  /** Treat scenarios that passed only on retry as CI failures */
+  failOnFlaky?: boolean;
+  /** Optional industrial quality gates / SLO budgets */
+  budgets?: BudgetsConfig;
   reports: ReportsConfig;
   artifacts: ArtifactsConfig;
   redaction: RedactionConfig;
@@ -356,8 +390,16 @@ export type OfflineLabConfigInput = {
   timeouts?: TimeoutsConfig;
   headless?: boolean;
   device?: string | DeviceConfig;
+  proxy?: ProxyConfig;
+  ignoreHTTPSErrors?: boolean;
+  extraHTTPHeaders?: Record<string, string>;
+  locale?: string;
+  timezoneId?: string;
   networkProfiles?: Record<string, Partial<NetworkProfileConfig>>;
   unsupportedPolicy?: UnsupportedCapabilityPolicy;
+  maxFailures?: number;
+  failOnFlaky?: boolean;
+  budgets?: BudgetsConfig;
   reports?: Partial<ReportsConfig>;
   artifacts?: Partial<ArtifactsConfig>;
   redaction?: Partial<RedactionConfig>;
@@ -398,9 +440,13 @@ export type ScenarioStep =
   | { action: "expectHidden"; selector: string; timeoutMs?: number }
   | { action: "expectText"; selector: string; text: string; exact?: boolean; timeoutMs?: number }
   | { action: "expectURL"; url: string; exact?: boolean; timeoutMs?: number }
-  | { action: "expectRequestCount"; url: string; count?: number; min?: number; max?: number; method?: string }
-  | { action: "expectResponseStatus"; url: string; status: number; method?: string }
+  | { action: "expectRequestCount"; url: string; count?: number; min?: number; max?: number; method?: string; timeoutMs?: number }
+  | { action: "expectResponseStatus"; url: string; status: number; method?: string; timeoutMs?: number }
   | { action: "expectNoConsoleErrors"; ignorePatterns?: string[] }
+  | { action: "expectNoFailedRequests"; ignorePatterns?: string[]; includeInjected?: boolean }
+  | { action: "expectServiceWorker"; registered?: boolean; controlled?: boolean; state?: "installing" | "installed" | "activating" | "activated" }
+  | { action: "expectRetryPattern"; url: string; method?: string; minAttempts: number; maxAttempts?: number; minIntervalMs?: number; requireBackoff?: boolean; timeoutMs?: number }
+  | { action: "expectMaxRequestDuration"; url: string; maxDurationMs: number; method?: string }
   | { action: "expectStorageValue"; storage: "localStorage" | "sessionStorage"; key: string; value?: string; exists?: boolean }
   | { action: "expectCacheContains"; urlPattern: string; cacheName?: string }
   | { action: "expectIndexedDBRecord"; database: string; store: string; minCount?: number; count?: number; match?: Record<string, unknown>; timeoutMs?: number }
@@ -457,10 +503,14 @@ export interface OfflineLabExpect {
   (target: Page): PageExpectMatcher;
   <T>(target: T): ValueExpectMatcher<T>;
   noConsoleErrors(ignorePatterns?: string[]): Promise<void>;
+  noFailedRequests(options?: { ignorePatterns?: string[]; includeInjected?: boolean }): Promise<void>;
+  serviceWorker(options?: { registered?: boolean; controlled?: boolean; state?: "installing" | "installed" | "activating" | "activated" }): Promise<void>;
+  retryPattern(options: { url: string; method?: string; minAttempts: number; maxAttempts?: number; minIntervalMs?: number; requireBackoff?: boolean; timeoutMs?: number }): Promise<void>;
+  maxRequestDuration(options: { url: string; maxDurationMs: number; method?: string }): Promise<void>;
   cacheContains(urlPattern: string, cacheName?: string): Promise<void>;
   indexedDBRecord(options: { database: string; store: string; minCount?: number; count?: number; match?: Record<string, unknown>; timeoutMs?: number }): Promise<void>;
-  requestCount(options: { url: string; count?: number; min?: number; max?: number; method?: string }): Promise<void>;
-  responseStatus(options: { url: string; status: number; method?: string }): Promise<void>;
+  requestCount(options: { url: string; count?: number; min?: number; max?: number; method?: string; timeoutMs?: number }): Promise<void>;
+  responseStatus(options: { url: string; status: number; method?: string; timeoutMs?: number }): Promise<void>;
   storageValue(options: { storage: "localStorage" | "sessionStorage"; key: string; value?: string; exists?: boolean }): Promise<void>;
   custom(name: string, options?: Record<string, unknown>): Promise<void>;
 }
@@ -586,6 +636,8 @@ export interface ScenarioResult {
   completedAt: string;
   durationMs: number;
   attempts: number;
+  /** True when the scenario failed initially and passed on a subsequent retry */
+  flaky?: boolean;
   profilesUsed: string[];
   steps: StepResult[];
   assertions: AssertionResult[];
@@ -610,6 +662,7 @@ export interface RunSummary {
   total: number;
   passed: number;
   failed: number;
+  flaky: number;
   skipped: number;
   unsupported: number;
   totalAssertions: number;

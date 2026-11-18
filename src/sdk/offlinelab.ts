@@ -24,6 +24,7 @@ import type {
   OfflineLabExpect,
   OfflineLabPlugin,
   ProgrammaticScenarioDefinition,
+  ProxyConfig,
   RecordedRequest,
   RedactionConfig,
   ScenarioDefinition,
@@ -59,6 +60,11 @@ export interface OfflineLabOptions {
   headless?: boolean;
   serviceWorkers?: ServiceWorkerPolicy;
   device?: string | DeviceConfig;
+  proxy?: ProxyConfig;
+  ignoreHTTPSErrors?: boolean;
+  extraHTTPHeaders?: Record<string, string>;
+  locale?: string;
+  timezoneId?: string;
   storageState?: string;
   timeoutMs?: number;
   networkProfiles?: Record<string, Partial<NetworkProfileConfig>>;
@@ -120,6 +126,11 @@ export class OfflineLab {
       baseURL: this.options.baseURL,
       serviceWorkers: this.options.serviceWorkers ?? "allow",
       device: this.options.device,
+      proxy: this.options.proxy,
+      ignoreHTTPSErrors: this.options.ignoreHTTPSErrors,
+      extraHTTPHeaders: this.options.extraHTTPHeaders,
+      locale: this.options.locale,
+      timezoneId: this.options.timezoneId,
       storageState: this.options.storageState,
       timeoutMs: this.options.timeoutMs ?? 30_000,
     });
